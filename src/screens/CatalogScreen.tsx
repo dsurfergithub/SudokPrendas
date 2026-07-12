@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Garment, type Category, type Formality } from '../db/database';
 import { compressImage } from '../lib/imageUtils';
-import { Plus, X, Upload, Trash2, Pencil } from 'lucide-react';
+import { Plus, X, Upload, Trash2, Pencil, Camera } from 'lucide-react';
 import { cn } from '../lib/utils';
+import CameraCapture from '../components/CameraCapture';
 
 const CATEGORY_LABELS: Record<Category, string> = {
   top: 'Superior',
@@ -16,17 +17,40 @@ export default function CatalogScreen() {
   const garments = useLiveQuery(() => db.garments.orderBy('createdAt').reverse().toArray());
   const [editingGarment, setEditingGarment] = useState<Garment | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [showMainCamera, setShowMainCamera] = useState(false);
+  const [pendingBlobs, setPendingBlobs] = useState<Blob[]>([]);
 
   return (
     <div className="h-full flex flex-col relative bg-[#F8F7F5]">
+      {showMainCamera && (
+        <CameraCapture 
+          onComplete={(blobs) => {
+            setShowMainCamera(false);
+            if (blobs.length > 0) {
+              setPendingBlobs(blobs);
+            }
+          }}
+          onCancel={() => setShowMainCamera(false)}
+        />
+      )}
       <header className="h-16 px-6 border-b border-slate-200 flex items-center justify-between bg-white bg-opacity-80 backdrop-blur-md sticky top-0 z-10 shrink-0">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Armario</h1>
-        <button
-          onClick={() => setIsAdding(true)}
-          className="p-2 -mr-2 text-slate-900 hover:bg-slate-100 rounded-full transition-colors"
-        >
-          <Plus className="w-6 h-6" />
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowMainCamera(true)}
+            className="p-2 text-slate-900 hover:bg-slate-100 rounded-full transition-colors flex items-center gap-1.5"
+            title="Cámara por voz"
+          >
+            <Camera className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setIsAdding(true)}
+            className="p-2 -mr-2 text-slate-900 hover:bg-slate-100 rounded-full transition-colors"
+            title="Añadir manual"
+          >
+            <Plus className="w-6 h-6" />
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4">
@@ -35,15 +59,22 @@ export default function CatalogScreen() {
         ) : garments.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-              <Plus className="w-8 h-8 text-slate-400" />
+              <Camera className="w-8 h-8 text-slate-400" />
             </div>
             <h2 className="text-lg font-medium text-slate-900 mb-2">Tu armario está vacío</h2>
-            <p className="text-sm text-slate-500 mb-6">Añade tu primera prenda para empezar a crear combinaciones.</p>
+            <p className="text-sm text-slate-500 mb-6">Usa la cámara por voz para añadir prendas rápidamente.</p>
+            <button
+              onClick={() => setShowMainCamera(true)}
+              className="bg-slate-900 text-white px-6 py-3 rounded-full text-sm font-medium hover:bg-slate-800 transition-colors flex items-center gap-2 shadow-md"
+            >
+              <Camera className="w-4 h-4" />
+              Capturar por voz
+            </button>
             <button
               onClick={() => setIsAdding(true)}
-              className="bg-slate-900 text-white px-6 py-3 rounded-full text-sm font-medium hover:bg-slate-800 transition-colors"
+              className="mt-4 text-slate-500 hover:text-slate-900 text-sm font-medium underline underline-offset-4"
             >
-              Añadir prenda
+              Añadir manualmente
             </button>
           </div>
         ) : (
@@ -55,12 +86,14 @@ export default function CatalogScreen() {
         )}
       </div>
 
-      {(isAdding || editingGarment) && (
+      {(isAdding || editingGarment || pendingBlobs.length > 0) && (
         <GarmentForm 
           initialGarment={editingGarment || undefined}
+          initialBlobs={pendingBlobs}
           onClose={() => {
             setIsAdding(false);
             setEditingGarment(null);
+            setPendingBlobs([]);
           }} 
         />
       )}
@@ -129,9 +162,11 @@ function GarmentCard({ garment, onEdit }: { garment: Garment, onEdit: () => void
   );
 }
 
-function GarmentForm({ onClose, initialGarment }: { onClose: () => void, initialGarment?: Garment }) {
-  const [photo, setPhoto] = useState<File | null>(null);
+function GarmentForm({ onClose, initialGarment, initialBlobs = [] }: { onClose: () => void, initialGarment?: Garment, initialBlobs?: Blob[] }) {
+  const [photo, setPhoto] = useState<File | Blob | null>(initialBlobs.length > 0 ? initialBlobs[0] : null);
+  const [queue, setQueue] = useState<Blob[]>(initialBlobs.slice(1));
   const [photoPreview, setPhotoPreview] = useState<string>();
+  const [showCamera, setShowCamera] = useState(false);
   const [name, setName] = useState(initialGarment?.name || '');
   const [category, setCategory] = useState<Category>(initialGarment?.category || 'top');
   const [formality, setFormality] = useState<Formality>(initialGarment?.formality || 2);
@@ -147,6 +182,8 @@ function GarmentForm({ onClose, initialGarment }: { onClose: () => void, initial
       const url = URL.createObjectURL(initialGarment.photo);
       setPhotoPreview(url);
       return () => URL.revokeObjectURL(url);
+    } else {
+      setPhotoPreview(undefined);
     }
   }, [photo, initialGarment]);
 
@@ -175,7 +212,15 @@ function GarmentForm({ onClose, initialGarment }: { onClose: () => void, initial
       } else {
         await db.garments.add(garmentData);
       }
-      onClose();
+      
+      if (queue.length > 0) {
+        setPhoto(queue[0]);
+        setQueue(prev => prev.slice(1));
+        setName('');
+        setIsSubmitting(false);
+      } else {
+        onClose();
+      }
     } catch (err) {
       console.error('Error saving garment', err);
       alert('Error al guardar la prenda. La imagen podría ser inválida.');
@@ -183,35 +228,71 @@ function GarmentForm({ onClose, initialGarment }: { onClose: () => void, initial
     }
   };
 
+  const totalInBatch = initialBlobs.length;
+  const currentInBatch = totalInBatch - queue.length;
+
   return (
     <div className="absolute inset-0 bg-white z-50 flex flex-col animate-in slide-in-from-bottom-4 duration-300">
-      <header className="border-b border-gray-200 px-4 py-3 flex justify-between items-center shrink-0">
+      {showCamera && (
+        <CameraCapture 
+          onComplete={(blobs) => {
+            if (blobs.length > 0) {
+              setPhoto(blobs[0]);
+              setQueue(blobs.slice(1));
+            }
+            setShowCamera(false);
+          }}
+          onCancel={() => setShowCamera(false)}
+        />
+      )}
+      <header className="border-b border-gray-200 px-4 py-3 flex justify-between items-center shrink-0 bg-[#F8F7F5]">
         <button onClick={onClose} className="p-2 -ml-2 text-gray-500 hover:text-gray-900">
           <X className="w-6 h-6" />
         </button>
-        <h2 className="text-base font-medium">{initialGarment ? 'Editar prenda' : 'Nueva prenda'}</h2>
+        <div className="flex flex-col items-center">
+          <h2 className="text-base font-medium">{initialGarment ? 'Editar prenda' : 'Nueva prenda'}</h2>
+          {totalInBatch > 1 && (
+            <span className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mt-0.5">
+              Foto {currentInBatch} de {totalInBatch}
+            </span>
+          )}
+        </div>
         <div className="w-10" /> {/* Spacer */}
       </header>
 
       <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-2">Foto (Obligatoria)</label>
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className={cn(
-              "aspect-square rounded-2xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer overflow-hidden transition-colors",
-              photoPreview ? "border-transparent bg-gray-100" : "border-gray-300 hover:border-gray-400 bg-gray-50"
-            )}
-          >
-            {photoPreview ? (
+          <label className="block text-sm font-medium text-gray-900 mb-2">Foto {initialGarment ? '' : '(Obligatoria)'}</label>
+          {photoPreview ? (
+            <div className="relative aspect-square rounded-2xl overflow-hidden border border-gray-200 bg-gray-100 group">
               <img src={photoPreview} className="w-full h-full object-cover" alt="Preview" />
-            ) : (
-              <>
-                <Upload className="w-8 h-8 text-gray-400 mb-2" />
-                <span className="text-sm text-gray-500">Tocar para subir</span>
-              </>
-            )}
-          </div>
+              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-4 transition-opacity">
+                 <button type="button" onClick={() => setShowCamera(true)} className="p-4 bg-white text-gray-900 rounded-full hover:bg-gray-100 transition-colors shadow-lg"><Camera className="w-6 h-6" /></button>
+                 <button type="button" onClick={() => fileInputRef.current?.click()} className="p-4 bg-white text-gray-900 rounded-full hover:bg-gray-100 transition-colors shadow-lg"><Upload className="w-6 h-6" /></button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setShowCamera(true)}
+                className="aspect-square rounded-2xl border-2 border-dashed border-gray-300 hover:border-gray-400 bg-gray-50 flex flex-col items-center justify-center transition-colors text-gray-500 hover:text-gray-700"
+              >
+                <Camera className="w-8 h-8 mb-2" />
+                <span className="text-sm font-medium">Cámara por voz</span>
+                <span className="text-[10px] uppercase tracking-wider font-bold opacity-70 mt-1">Di "Foto"</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="aspect-square rounded-2xl border-2 border-dashed border-gray-300 hover:border-gray-400 bg-gray-50 flex flex-col items-center justify-center transition-colors text-gray-500 hover:text-gray-700"
+              >
+                <Upload className="w-8 h-8 mb-2" />
+                <span className="text-sm font-medium">Subir foto</span>
+                <span className="text-[10px] uppercase tracking-wider font-bold opacity-70 mt-1">Galería</span>
+              </button>
+            </div>
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -284,7 +365,7 @@ function GarmentForm({ onClose, initialGarment }: { onClose: () => void, initial
             disabled={!photo || !name.trim() || isSubmitting}
             className="w-full bg-gray-900 text-white py-4 rounded-xl font-medium disabled:opacity-50 transition-opacity"
           >
-            {isSubmitting ? 'Guardando...' : 'Guardar prenda'}
+            {isSubmitting ? 'Guardando...' : queue.length > 0 ? 'Guardar y siguiente' : 'Guardar prenda'}
           </button>
         </div>
       </form>
