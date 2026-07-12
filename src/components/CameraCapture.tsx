@@ -133,19 +133,33 @@ export default function CameraCapture({ onComplete, onCancel }: { onComplete: (b
     };
   }, []);
 
+  const toggleListening = () => {
+    if (!recognitionRef.current) return;
+    if (isListening) {
+      try { recognitionRef.current.stop(); } catch(e) {}
+    } else {
+      try { recognitionRef.current.start(); } catch(e) {
+        console.error("Could not start recognition", e);
+      }
+    }
+  };
+
   return (
     <div className="absolute inset-0 z-[60] bg-black flex flex-col animate-in fade-in duration-200">
       <header className="p-4 flex justify-between items-center text-white shrink-0 z-10">
         <button type="button" onClick={onCancel} className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors">
           <X className="w-6 h-6" />
         </button>
-        <div className={cn(
-          "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-colors border", 
-          isListening ? "bg-red-500/20 text-red-400 border-red-500/30" : "bg-white/10 text-white/50 border-white/10"
+        <button 
+          type="button"
+          onClick={toggleListening}
+          className={cn(
+          "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-colors border active:scale-95", 
+          isListening ? "bg-red-500/20 text-red-400 border-red-500/30" : "bg-white/10 text-white/50 border-white/10 hover:bg-white/20"
         )}>
           <Mic className="w-4 h-4" />
-          {isListening ? 'Di "Foto"' : 'Micrófono inactivo'}
-        </div>
+          {isListening ? 'Di "Foto"' : 'Tocar para voz'}
+        </button>
         <button 
           type="button" 
           onClick={() => onComplete(captures)}
